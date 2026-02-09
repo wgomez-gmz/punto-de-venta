@@ -1,0 +1,1116 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "punto-de-venta",
+    "version": "0.0.1",
+    "description": "Punto de venta",
+    "contact": {
+      "name": "wgomez0495",
+      "email": "wgomez@kenmeina.com"
+    }
+  },
+  "paths": {
+    "/cart-items/{id}/cart": {
+      "get": {
+        "x-controller-name": "CartItemCartController",
+        "x-operation-name": "getCart",
+        "tags": [
+          "CartItemCartController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cart belonging to CartItem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "operationId": "CartItemCartController.getCart"
+      }
+    },
+    "/carts/{id}/cart-items": {
+      "post": {
+        "x-controller-name": "CartCartItemController",
+        "x-operation-name": "create",
+        "tags": [
+          "CartCartItemController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cart model instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartItem"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCartItemInCart"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "CartCartItemController.create"
+      },
+      "patch": {
+        "x-controller-name": "CartCartItemController",
+        "x-operation-name": "patch",
+        "tags": [
+          "CartCartItemController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cart.CartItem PATCH success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "CartItem.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<CartItem>"
+                }
+              }
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartItemPartial"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "CartCartItemController.patch"
+      },
+      "get": {
+        "x-controller-name": "CartCartItemController",
+        "x-operation-name": "find",
+        "tags": [
+          "CartCartItemController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of Cart has many CartItem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CartItem"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "CartCartItemController.find"
+      },
+      "delete": {
+        "x-controller-name": "CartCartItemController",
+        "x-operation-name": "delete",
+        "tags": [
+          "CartCartItemController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Cart.CartItem DELETE success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "CartItem.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<CartItem>"
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "CartCartItemController.delete"
+      }
+    },
+    "/carts/{id}/users": {
+      "get": {
+        "x-controller-name": "CartUsersController",
+        "x-operation-name": "getUsers",
+        "tags": [
+          "CartUsersController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Users belonging to Cart",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Users"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "operationId": "CartUsersController.getUsers"
+      }
+    },
+    "/categories/{id}/products": {
+      "post": {
+        "x-controller-name": "CategoryProductController",
+        "x-operation-name": "create",
+        "tags": [
+          "CategoryProductController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Category model instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewProductInCategory"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "CategoryProductController.create"
+      },
+      "patch": {
+        "x-controller-name": "CategoryProductController",
+        "x-operation-name": "patch",
+        "tags": [
+          "CategoryProductController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Category.Product PATCH success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Product.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<Product>"
+                }
+              }
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductPartial"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "CategoryProductController.patch"
+      },
+      "get": {
+        "x-controller-name": "CategoryProductController",
+        "x-operation-name": "find",
+        "tags": [
+          "CategoryProductController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of Category has many Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Product"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "CategoryProductController.find"
+      },
+      "delete": {
+        "x-controller-name": "CategoryProductController",
+        "x-operation-name": "delete",
+        "tags": [
+          "CategoryProductController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Category.Product DELETE success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Product.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<Product>"
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "CategoryProductController.delete"
+      }
+    },
+    "/ping": {
+      "get": {
+        "x-controller-name": "PingController",
+        "x-operation-name": "ping",
+        "tags": [
+          "PingController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Ping Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PingResponse"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "PingController.ping"
+      }
+    },
+    "/products/{id}/category": {
+      "get": {
+        "x-controller-name": "ProductCategoryController",
+        "x-operation-name": "getCategory",
+        "tags": [
+          "ProductCategoryController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Category belonging to Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "operationId": "ProductCategoryController.getCategory"
+      }
+    },
+    "/users/{id}/cart": {
+      "post": {
+        "x-controller-name": "UsersCartController",
+        "x-operation-name": "create",
+        "tags": [
+          "UsersCartController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Users model instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCartInUsers"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "UsersCartController.create"
+      },
+      "patch": {
+        "x-controller-name": "UsersCartController",
+        "x-operation-name": "patch",
+        "tags": [
+          "UsersCartController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Users.Cart PATCH success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Cart.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<Cart>"
+                }
+              }
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartPartial"
+              }
+            }
+          },
+          "x-parameter-index": 1
+        },
+        "operationId": "UsersCartController.patch"
+      },
+      "get": {
+        "x-controller-name": "UsersCartController",
+        "x-operation-name": "get",
+        "tags": [
+          "UsersCartController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Users has one Cart",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "UsersCartController.get"
+      },
+      "delete": {
+        "x-controller-name": "UsersCartController",
+        "x-operation-name": "delete",
+        "tags": [
+          "UsersCartController"
+        ],
+        "responses": {
+          "200": {
+            "description": "Users.Cart DELETE success count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loopback.Count"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Cart.WhereFilter",
+                  "additionalProperties": true,
+                  "x-typescript-type": "@loopback/repository#Where<Cart>"
+                }
+              }
+            }
+          }
+        ],
+        "operationId": "UsersCartController.delete"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Cart": {
+        "title": "Cart",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "usersId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate"
+        ],
+        "additionalProperties": false
+      },
+      "NewCartInUsers": {
+        "title": "NewCartInUsers",
+        "type": "object",
+        "description": "(tsType: @loopback/repository-json-schema#Optional<Omit<Cart, 'id'>, 'usersId'>, schemaOptions: { title: 'NewCartInUsers', exclude: [ 'id' ], optional: [ 'usersId' ] })",
+        "properties": {
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "usersId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate"
+        ],
+        "additionalProperties": false,
+        "x-typescript-type": "@loopback/repository-json-schema#Optional<Omit<Cart, 'id'>, 'usersId'>"
+      },
+      "CartPartial": {
+        "title": "CartPartial",
+        "type": "object",
+        "description": "(tsType: Partial<Cart>, schemaOptions: { partial: true })",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "usersId": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false,
+        "x-typescript-type": "Partial<Cart>"
+      },
+      "Category": {
+        "title": "Category",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "creationDate",
+          "name",
+          "key"
+        ],
+        "additionalProperties": false
+      },
+      "Product": {
+        "title": "Product",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "cost": {
+            "type": "number"
+          },
+          "stock": {
+            "type": "number"
+          },
+          "minStock": {
+            "type": "number"
+          },
+          "categoryId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate",
+          "name",
+          "price",
+          "stock"
+        ],
+        "additionalProperties": false
+      },
+      "NewProductInCategory": {
+        "title": "NewProductInCategory",
+        "type": "object",
+        "description": "(tsType: @loopback/repository-json-schema#Optional<Omit<Product, 'id'>, 'categoryId'>, schemaOptions: { title: 'NewProductInCategory', exclude: [ 'id' ], optional: [ 'categoryId' ] })",
+        "properties": {
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "cost": {
+            "type": "number"
+          },
+          "stock": {
+            "type": "number"
+          },
+          "minStock": {
+            "type": "number"
+          },
+          "categoryId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate",
+          "name",
+          "price",
+          "stock"
+        ],
+        "additionalProperties": false,
+        "x-typescript-type": "@loopback/repository-json-schema#Optional<Omit<Product, 'id'>, 'categoryId'>"
+      },
+      "ProductPartial": {
+        "title": "ProductPartial",
+        "type": "object",
+        "description": "(tsType: Partial<Product>, schemaOptions: { partial: true })",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "cost": {
+            "type": "number"
+          },
+          "stock": {
+            "type": "number"
+          },
+          "minStock": {
+            "type": "number"
+          },
+          "categoryId": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false,
+        "x-typescript-type": "Partial<Product>"
+      },
+      "Users": {
+        "title": "Users",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "username": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "roleId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate",
+          "username"
+        ],
+        "additionalProperties": false
+      },
+      "CartItem": {
+        "title": "CartItem",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "cartId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate",
+          "quantity"
+        ],
+        "additionalProperties": false
+      },
+      "NewCartItemInCart": {
+        "title": "NewCartItemInCart",
+        "type": "object",
+        "description": "(tsType: @loopback/repository-json-schema#Optional<Omit<CartItem, 'id'>, 'cartId'>, schemaOptions: { title: 'NewCartItemInCart', exclude: [ 'id' ], optional: [ 'cartId' ] })",
+        "properties": {
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "cartId": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "creationDate",
+          "quantity"
+        ],
+        "additionalProperties": false,
+        "x-typescript-type": "@loopback/repository-json-schema#Optional<Omit<CartItem, 'id'>, 'cartId'>"
+      },
+      "CartItemPartial": {
+        "title": "CartItemPartial",
+        "type": "object",
+        "description": "(tsType: Partial<CartItem>, schemaOptions: { partial: true })",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "creationDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updateDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "number"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "cartId": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false,
+        "x-typescript-type": "Partial<CartItem>"
+      },
+      "loopback.Count": {
+        "type": "object",
+        "title": "loopback.Count",
+        "x-typescript-type": "@loopback/repository#Count",
+        "properties": {
+          "count": {
+            "type": "number"
+          }
+        }
+      },
+      "PingResponse": {
+        "type": "object",
+        "title": "PingResponse",
+        "properties": {
+          "greeting": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "headers": {
+            "type": "object",
+            "properties": {
+              "Content-Type": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  }
+}

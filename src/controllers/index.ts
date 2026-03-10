@@ -9,6 +9,7 @@ export * from './cart-item-controller.controller';
 export * from './cart-item-product-variation.controller';
 export * from './cart-item-product.controller';
 export * from './category-controller.controller';
+export * from './commerce-engagement.controller';
 export * from './formulario-campo-formulario.controller';
 export * from './formulario.controller';
 export * from './opcion-campo-campo-formulario.controller';

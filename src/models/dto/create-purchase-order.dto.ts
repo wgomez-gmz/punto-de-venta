@@ -118,4 +118,9 @@ export class CreatePurchaseOrderDto {
     required: true,
   })
   paymentMethod: any;
+
+  @property({
+    type: 'string',
+  })
+  couponCode?: string;
 }

@@ -5,7 +5,7 @@ import {BaseEntity} from './base-entity.model';
 
 @model()
 export class PromotionCarousel extends BaseEntity {
-  @property({
+  @belongsTo(() => Attachment, {}, {
     type: 'number',
     required: true,
   })
@@ -44,9 +44,6 @@ export class PromotionCarousel extends BaseEntity {
     default: 0,
   })
   order?: number;
-
-  @belongsTo(() => Attachment)
-  attachment: Attachment;
 
   constructor(data?: Partial<PromotionCarousel>) {
     super(data);

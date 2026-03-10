@@ -1,7 +1,6 @@
 import {belongsTo, model, property} from '@loopback/repository';
-import {Attachment} from './attachment.model';
 import {BaseEntity} from './base-entity.model';
-import {Product} from './product.model';
+import {Attachment, Product} from '.';
 
 /**
  * ProductImages model representing the many-to-many relationship between products and attachments
@@ -11,7 +10,7 @@ export class ProductImages extends BaseEntity {
   /**
    * Product ID
    */
-  @property({
+  @belongsTo(() => Product, {}, {
     type: 'number',
     required: true,
   })
@@ -20,17 +19,11 @@ export class ProductImages extends BaseEntity {
   /**
    * Attachment ID
    */
-  @property({
+  @belongsTo(() => Attachment, {}, {
     type: 'number',
     required: true,
   })
   attachmentId: number;
-
-  @belongsTo(() => Product)
-  product: Product;
-
-  @belongsTo(() => Attachment)
-  attachment: Attachment;
 
   /**
    * Indicates if this is the main image for the product
@@ -65,8 +58,8 @@ export class ProductImages extends BaseEntity {
 }
 
 export interface ProductImagesRelations {
-  product?: any;
-  attachment?: any;
+  product?: Product;
+  attachment?: Attachment;
 }
 
 export type ProductImagesWithRelations = ProductImages & ProductImagesRelations;

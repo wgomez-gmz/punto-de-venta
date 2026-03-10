@@ -18,7 +18,7 @@ import {
   response,
 } from '@loopback/rest';
 import {CreateProductDto, Product, ProductDto} from '../models';
-import {AttachmentRepository, ProductRepository} from '../repositories';
+import {AttachmentRepository, ProductRepository, ProductReviewRepository} from '../repositories';
 import {ProductAttributeRepository} from '../repositories/product-attribute.repository';
 import {ProductCategoriesRepository} from '../repositories/product-categories.repository';
 import {ProductImagesRepository} from '../repositories/product-images.repository';
@@ -40,6 +40,8 @@ export class ProductControllerController {
     public productAttributeRepository: ProductAttributeRepository,
     @repository(ProductVariationRepository)
     public productVariationRepository: ProductVariationRepository,
+    @repository(ProductReviewRepository)
+    public productReviewRepository: ProductReviewRepository,
     @service() public productServiceService: ProductServiceService,
   ) { }
 
@@ -203,8 +205,22 @@ export class ProductControllerController {
       return {
         ...product,
         attachmentId: attachmentId,
+        ...(await this.getReviewSummary(product.id!)),
       } as ProductDto;
     }));
+  }
+
+  private async getReviewSummary(productId: number): Promise<{rating: number; reviewCount: number}> {
+    const reviews = await this.productReviewRepository.find({where: {productId}});
+    if (reviews.length === 0) {
+      return {rating: 0, reviewCount: 0};
+    }
+
+    const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+    return {
+      rating: Number((totalRating / reviews.length).toFixed(1)),
+      reviewCount: reviews.length,
+    };
   }
 
   @patch('/products')

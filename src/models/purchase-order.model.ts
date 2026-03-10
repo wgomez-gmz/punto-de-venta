@@ -37,6 +37,27 @@ export class PurchaseOrder extends BaseEntity {
   total: number;
 
   @property({
+    type: 'number',
+  })
+  subtotal?: number;
+
+  @property({
+    type: 'number',
+    default: 0,
+  })
+  discountTotal?: number;
+
+  @property({
+    type: 'string',
+  })
+  couponCode?: string;
+
+  @property({
+    type: 'object',
+  })
+  couponSnapshot?: any;
+
+  @property({
     type: 'object',
     required: true,
   })

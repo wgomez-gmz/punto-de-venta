@@ -28,17 +28,11 @@ export class PaymentMethodField extends BaseEntity {
   /**
    * Foreign key to PaymentMethod
    */
-  @property({
+  @belongsTo(() => PaymentMethod, {}, {
     type: 'number',
     required: true,
   })
   paymentMethodId: number;
-
-  /**
-   * Payment method this field belongs to
-   */
-  @belongsTo(() => PaymentMethod)
-  paymentMethod: PaymentMethod;
 
   constructor(data?: Partial<PaymentMethodField>) {
     super(data);

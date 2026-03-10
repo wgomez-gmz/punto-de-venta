@@ -4,7 +4,7 @@ import {HttpErrors} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {CreatePurchaseOrderDto} from '../models/dto/create-purchase-order.dto';
 import {PurchaseOrder} from '../models/purchase-order.model';
-import {CartItemRepository, PurchaseOrderRepository} from '../repositories';
+import {CartItemRepository, CouponRepository, CouponUsageRepository, PurchaseOrderRepository} from '../repositories';
 import {ProductVariationRepository} from '../repositories/product-variation.repository';
 import {ProductRepository} from '../repositories/product.repository';
 import {PurchaseOrderHistoryRepository} from '../repositories/purchase-order-history.repository';
@@ -32,6 +32,10 @@ export class PurchaseOrderService {
     public purchaseOrderStatusRepository: PurchaseOrderStatusRepository,
     @repository(CartItemRepository)
     public cartItemRepository: CartItemRepository,
+    @repository(CouponRepository)
+    public couponRepository: CouponRepository,
+    @repository(CouponUsageRepository)
+    public couponUsageRepository: CouponUsageRepository,
     @service() public cartService: CartServiceService,
   ) { }
 
@@ -39,7 +43,7 @@ export class PurchaseOrderService {
     currentUserProfile: UserProfile,
     createPurchaseOrderDto: CreatePurchaseOrderDto
   ): Promise<PurchaseOrder> {
-    const {formResponses, cartItems, total, paymentMethod} = createPurchaseOrderDto;
+    const {formResponses, cartItems, total, paymentMethod, couponCode} = createPurchaseOrderDto;
 
     const dataSource = this.purchaseOrderRepository.dataSource;
     if (!dataSource) {
@@ -117,10 +121,29 @@ export class PurchaseOrderService {
         }
       }
 
+      const subtotal = Number(enabledCartItems.reduce((sum, item) => {
+        const itemPrice = item.discountEnable && item.discountedPrice ? item.discountedPrice : (item.price ?? 0);
+        return sum + (itemPrice * item.quantity);
+      }, 0).toFixed(2));
+
+      const couponValidation = couponCode
+        ? await this.validateCoupon(couponCode, subtotal, Number(currentUserProfile.id))
+        : null;
+      const discountTotal = couponValidation?.discountAmount || 0;
+      const calculatedTotal = Number(Math.max(subtotal - discountTotal, 0).toFixed(2));
+
+      if (Number(total.toFixed(2)) !== calculatedTotal) {
+        throw new HttpErrors.BadRequest('El total enviado no coincide con el total calculado por el servidor.');
+      }
+
       // Create the purchase order
       const purchaseOrder = await this.purchaseOrderRepository.create({
         usersId: currentUserProfile.id,
-        total,
+        subtotal,
+        discountTotal,
+        couponCode: couponValidation?.coupon.code,
+        couponSnapshot: couponValidation?.coupon,
+        total: calculatedTotal,
         paymentMethodSnapshot: paymentMethod,
         currentStatusId: undefined, // Will be set after status creation
       }, {transaction: tx});
@@ -197,11 +220,70 @@ export class PurchaseOrderService {
         userId: undefined, // System-generated status change
       }, {transaction: tx});
 
+      if (couponValidation?.coupon.id) {
+        await this.couponUsageRepository.create({
+          couponId: couponValidation.coupon.id,
+          usersId: Number(currentUserProfile.id),
+          purchaseOrderId: purchaseOrder.id!,
+          discountAmount: couponValidation.discountAmount,
+        }, {transaction: tx});
+
+        await this.couponRepository.updateById(couponValidation.coupon.id, {
+          usageCount: (couponValidation.coupon.usageCount || 0) + 1,
+        }, {transaction: tx});
+      }
+
       await tx.commit();
       return purchaseOrder;
     } catch (err) {
       await tx.rollback();
       throw err;
     }
+  }
+
+  private async validateCoupon(code: string, subtotal: number, usersId: number): Promise<any> {
+    const normalizedCode = String(code || '').trim().toUpperCase();
+    const coupon = await this.couponRepository.findOne({
+      where: {code: normalizedCode},
+    });
+
+    if (!coupon || !coupon.isActive) {
+      throw new HttpErrors.NotFound('El cupon no esta disponible.');
+    }
+
+    const now = new Date();
+    if (coupon.startDate && new Date(coupon.startDate) > now) {
+      throw new HttpErrors.UnprocessableEntity('El cupon aun no esta vigente.');
+    }
+    if (coupon.endDate && new Date(coupon.endDate) < now) {
+      throw new HttpErrors.UnprocessableEntity('El cupon ya expiro.');
+    }
+    if (coupon.minimumOrderAmount && subtotal < coupon.minimumOrderAmount) {
+      throw new HttpErrors.UnprocessableEntity('El monto minimo para aplicar este cupon no se cumple.');
+    }
+    if (coupon.usageLimit && (coupon.usageCount || 0) >= coupon.usageLimit) {
+      throw new HttpErrors.UnprocessableEntity('El cupon ya alcanzo su limite de uso.');
+    }
+
+    const usageCount = await this.couponUsageRepository.count({
+      couponId: coupon.id,
+      usersId,
+    });
+    if (coupon.perUserLimit && usageCount.count >= coupon.perUserLimit) {
+      throw new HttpErrors.UnprocessableEntity('Ya utilizaste este cupon el numero maximo de veces permitido.');
+    }
+
+    let discountAmount = coupon.discountType === 'fixed'
+      ? coupon.discountValue
+      : subtotal * (coupon.discountValue / 100);
+
+    if (coupon.maxDiscountAmount) {
+      discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
+    }
+
+    return {
+      coupon,
+      discountAmount: Number(discountAmount.toFixed(2)),
+    };
   }
 }

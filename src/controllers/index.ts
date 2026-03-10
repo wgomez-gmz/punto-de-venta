@@ -19,6 +19,7 @@ export * from './product-controller.controller';
 export * from './promotion-carousel.controller';
 export * from './role-controller.controller';
 export * from './user-controller.controller';
+export * from './user-address.controller';
 
 export * from './campo-formulario.controller';
 export * from './opcion-campo.controller';

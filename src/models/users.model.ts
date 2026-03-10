@@ -2,6 +2,7 @@ import {belongsTo, hasMany, hasOne, model, property} from '@loopback/repository'
 import {BaseEntity, UserPermission} from '.';
 import {Cart} from './cart.model';
 import {People} from './people.model';
+import {UserAddress} from './user-address.model';
 import {Role} from './role.model';
 import {UserCredentials} from './user-credentials.model';
 import {PurchaseOrder} from './purchase-order.model';
@@ -73,6 +74,9 @@ export class Users extends BaseEntity {
   @hasMany(() => PurchaseOrder)
   purchaseOrders: PurchaseOrder[];
 
+  @hasMany(() => UserAddress)
+  addresses: UserAddress[];
+
   constructor(data?: Partial<Users>) {
     super(data);
   }
@@ -83,6 +87,7 @@ export interface UsersRelations {
   role?: Role;
   cart?: Cart;
   userPermissions?: UserPermission[];
+  addresses?: UserAddress[];
 }
 
 export type UsersWithRelations = Users & UsersRelations;

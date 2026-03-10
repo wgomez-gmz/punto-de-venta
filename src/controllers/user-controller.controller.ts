@@ -20,12 +20,15 @@ import {
   requestBody,
   response,
 } from '@loopback/rest';
+import {authenticate} from '@loopback/authentication';
 import {omit} from 'lodash';
+import {SecurityBindings, UserProfile} from '@loopback/security';
 import {PasswordHasherBindings, TokenServiceBindings, UserServiceBindings} from '../keys';
-import {Role, UserPermission, Users} from '../models';
+import {People, Role, UserPermission, Users} from '../models';
 import {CreateCustomerDto} from '../models/dto/create-customer.dto';
 import {PermissionRepository, UserPermissionRepository, UsersRepository} from '../repositories';
 import {RoleRepository} from '../repositories/role.repository';
+import {UserAddressRepository} from '../repositories/user-address.repository';
 import {PasswordHasher} from '../services/hash.password.bcryptjs';
 import {Credentials, requestBodyCreateUser, userData} from '../specs/user.specs';
 
@@ -39,6 +42,8 @@ export class UserControllerController {
     public permissionRepository: PermissionRepository,
     @repository(RoleRepository)
     public roleRepository: RoleRepository,
+    @repository(UserAddressRepository)
+    public userAddressRepository: UserAddressRepository,
     @inject(PasswordHasherBindings.PASSWORD_HASHER)
     public passwordHasher: PasswordHasher,
     @inject(UserServiceBindings.USER_SERVICE)
@@ -217,6 +222,203 @@ export class UserControllerController {
     const role = (user as any).role || null;
 
     return {token, user, role};
+  }
+
+  @get('/users/me')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Current authenticated user',
+    content: {'application/json': {schema: getModelSchemaRef(Users, {includeRelations: true})}},
+  })
+  async getCurrentUser(
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+  ): Promise<Users> {
+    return this.usersRepository.findById(Number(currentUserProfile.id), {
+      include: [
+        {relation: 'role'},
+        {relation: 'people'},
+        {relation: 'addresses'},
+      ],
+    });
+  }
+
+  @patch('/users/me/profile')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Current authenticated user updated',
+    content: {'application/json': {schema: getModelSchemaRef(Users, {includeRelations: true})}},
+  })
+  async updateCurrentUserProfile(
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              email: {type: 'string'},
+              name: {type: 'string'},
+              firstLastName: {type: 'string'},
+              secondLastName: {type: 'string'},
+              phone: {type: 'string'},
+              birthday: {type: 'string', format: 'date'},
+            },
+          },
+        },
+      },
+    })
+    profileData: Partial<People> & {email?: string},
+  ): Promise<Users> {
+    const userId = Number(currentUserProfile.id);
+    const currentUser = await this.usersRepository.findById(userId, {
+      include: [{relation: 'people'}],
+    });
+
+    if (profileData.email) {
+      const duplicatedUser = await this.usersRepository.findOne({
+        where: {
+          username: profileData.email,
+          id: {neq: userId},
+        },
+      });
+      if (duplicatedUser) {
+        throw new HttpErrors.Conflict('El correo electronico ya esta registrado.');
+      }
+      await this.usersRepository.updateById(userId, {
+        email: profileData.email,
+        username: profileData.email,
+      });
+    }
+
+    const peoplePayload: Partial<People> = {
+      name: profileData.name?.toUpperCase(),
+      firstLastName: profileData.firstLastName?.toUpperCase(),
+      secondLastName: profileData.secondLastName?.toUpperCase(),
+      phone: profileData.phone,
+      birthday: profileData.birthday,
+      email: profileData.email,
+    };
+
+    const cleanedPeoplePayload = Object.fromEntries(
+      Object.entries(peoplePayload).filter(([, value]) => value !== undefined),
+    );
+
+    if ((currentUser as any).people?.id) {
+      await this.usersRepository.people(userId).patch(cleanedPeoplePayload);
+    } else if (Object.keys(cleanedPeoplePayload).length > 0) {
+      await this.usersRepository.people(userId).create({
+        ...cleanedPeoplePayload,
+        email: profileData.email ?? currentUser.email ?? currentUser.username,
+        name: profileData.name?.toUpperCase() ?? currentUser.username,
+        firstLastName: profileData.firstLastName?.toUpperCase() ?? 'N/A',
+      });
+    }
+
+    return this.getCurrentUser(currentUserProfile);
+  }
+
+  @get('/users/customers')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Registered customers list for admin',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            data: {
+              type: 'array',
+              items: getModelSchemaRef(Users, {includeRelations: true}),
+            },
+            count: {type: 'number'},
+          },
+        },
+      },
+    },
+  })
+  async getCustomers(
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+    @param.query.string('search') search?: string,
+    @param.query.number('status') status?: number,
+  ): Promise<{data: Users[]; count: number}> {
+    await this.ensureAdminAccess(Number(currentUserProfile.id));
+    const customerRole = await this.roleRepository.findOne({
+      where: {key: 'customer'},
+    });
+    if (!customerRole?.id) {
+      return {data: [], count: 0};
+    }
+
+    const users = await this.usersRepository.find({
+      where: {
+        roleId: customerRole.id,
+        ...(status !== undefined ? {status} : {}),
+      },
+      include: [
+        {relation: 'people'},
+        {relation: 'addresses'},
+        {relation: 'role'},
+      ],
+      order: ['creationDate DESC'],
+    });
+
+    const normalizedSearch = String(search || '').trim().toLowerCase();
+    const filteredUsers = normalizedSearch
+      ? users.filter(user => {
+        const people = (user as any).people;
+        const candidateValues = [
+          user.username,
+          user.email,
+          people?.name,
+          people?.firstLastName,
+          people?.secondLastName,
+          people?.phone,
+        ];
+        return candidateValues.some(value => String(value || '').toLowerCase().includes(normalizedSearch));
+      })
+      : users;
+
+    return {
+      data: filteredUsers,
+      count: filteredUsers.length,
+    };
+  }
+
+  @patch('/users/{id}/status')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'User status updated',
+    content: {'application/json': {schema: getModelSchemaRef(Users, {includeRelations: true})}},
+  })
+  async updateUserStatus(
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+    @param.path.number('id') id: number,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: {type: 'number'},
+            },
+          },
+        },
+      },
+    })
+    body: {status: number},
+  ): Promise<Users> {
+    await this.ensureAdminAccess(Number(currentUserProfile.id));
+    await this.usersRepository.updateById(id, {
+      status: body.status,
+    });
+    return this.usersRepository.findById(id, {
+      include: [
+        {relation: 'people'},
+        {relation: 'addresses'},
+        {relation: 'role'},
+      ],
+    });
   }
 
   /*@post('/users')
@@ -411,5 +613,15 @@ export class UserControllerController {
       where: {usersId: id},
       include: ['permission'],
     });
+  }
+
+  private async ensureAdminAccess(userId: number): Promise<void> {
+    const user = await this.usersRepository.findById(userId, {
+      include: [{relation: 'role'}],
+    });
+    const roleKey = (user as any).role?.key;
+    if (!roleKey || !['admin', 'administrator', 'super_admin', 'store_admin'].includes(roleKey)) {
+      throw new HttpErrors.Forbidden('No tienes permisos para realizar esta accion.');
+    }
   }
 }

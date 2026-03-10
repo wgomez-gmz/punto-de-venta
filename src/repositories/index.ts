@@ -21,6 +21,7 @@ export * from './purchase-order-status.repository';
 export * from './role-permission.repository';
 export * from './role.repository';
 export * from './user-credentials.repository';
+export * from './user-address.repository';
 export * from './user-permission.repository';
 export * from './users.repository';
 

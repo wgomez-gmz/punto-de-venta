@@ -27,6 +27,7 @@ export * from './role-permission.model';
 export * from './role.model';
 export * from './user-credentials.model';
 export * from './user-permission.model';
+export * from './user-address.model';
 export * from './users.model';
 
 export * from './purchase-order.model';

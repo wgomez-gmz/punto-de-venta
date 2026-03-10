@@ -1,5 +1,6 @@
 import {BindingScope, injectable, service} from '@loopback/core';
-import {repository} from '@loopback/repository';
+import {IsolationLevel, repository} from '@loopback/repository';
+import {HttpErrors} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {CreatePurchaseOrderDto} from '../models/dto/create-purchase-order.dto';
 import {PurchaseOrder} from '../models/purchase-order.model';
@@ -40,121 +41,153 @@ export class PurchaseOrderService {
   ): Promise<PurchaseOrder> {
     const {formResponses, cartItems, total, paymentMethod} = createPurchaseOrderDto;
 
-    // Get current cart data from database to ensure integrity
-    const currentCart = await this.cartService.getCurrentUserCart(currentUserProfile);
-
-    // Validate that the cart items from the request match the current cart
-    if (!currentCart.cart || !currentCart.cart.cartItems) {
-      throw new Error('No active cart found for the user');
+    const dataSource = this.purchaseOrderRepository.dataSource;
+    if (!dataSource) {
+      throw new Error('DataSource not available for purchaseOrderRepository');
     }
 
-    const dbCartItems = currentCart.cart.cartItems.filter((item: any) => item.enable === true);
-    const enabledCartItems = cartItems.filter(item => item.enable === true);
-
-    console.log('dbCartItems', dbCartItems);
-    console.log('enabledCartItems', enabledCartItems);
-    if (dbCartItems.length !== enabledCartItems.length) {
-      throw new Error('Enabled cart items count mismatch between request and database');
-    }
-
-    // Check each enabled cart item for integrity
-    for (const requestItem of enabledCartItems) {
-      const dbItem = dbCartItems.find((item: any) =>
-        item.productId === requestItem.productId &&
-        item.productVariationId === requestItem.productVariationId
-      );
-
-      if (!dbItem) {
-        throw new Error(`Cart item not found in database: productId ${requestItem.productId}, variationId ${requestItem.productVariationId}`);
-      }
-
-      if (dbItem.quantity !== requestItem.quantity) {
-        throw new Error(`Quantity mismatch for productId ${requestItem.productId}: request ${requestItem.quantity}, database ${dbItem.quantity}`);
-      }
-
-      if (dbItem.price !== requestItem.price) {
-        throw new Error(`Price mismatch for productId ${requestItem.productId}: request ${requestItem.price}, database ${dbItem.price}`);
-      }
-
-      if (dbItem.discountedPrice !== requestItem.discountedPrice) {
-        throw new Error(`Discounted price mismatch for productId ${requestItem.productId}: request ${requestItem.discountedPrice}, database ${dbItem.discountedPrice}`);
-      }
-
-      // Validate stock availability
-      if (requestItem.productVariationId) {
-        // Check variation stock
-        const variationStock = dbItem.productVariation?.stock ?? 0;
-        if (variationStock < requestItem.quantity) {
-          throw new Error(`Insufficient stock for product variation ${requestItem.productVariationId}: available ${variationStock}, requested ${requestItem.quantity}`);
-        }
-      } else {
-        // Check product stock
-        const productStock = dbItem.product?.stock ?? 0;
-        if (productStock < requestItem.quantity) {
-          throw new Error(`Insufficient stock for product ${requestItem.productId}: available ${productStock}, requested ${requestItem.quantity}`);
-        }
-      }
-    }
-
-    // Create the purchase order
-    const purchaseOrder = await this.purchaseOrderRepository.create({
-      usersId: currentUserProfile.id,
-      total,
-      paymentMethodSnapshot: paymentMethod,
-      currentStatusId: undefined, // Will be set after status creation
+    const tx = await dataSource.beginTransaction({
+      isolationLevel: IsolationLevel.READ_COMMITTED,
     });
 
-    // Create purchase order items and deduct stock (only for enabled cart items)
-    for (const cartItem of enabledCartItems) {
-      const purchaseOrderItem = await this.purchaseOrderItemRepository.create({
-        purchaseOrderId: purchaseOrder.id!,
-        productId: cartItem.productId,
-        productVariationId: cartItem.productVariationId,
-        quantity: cartItem.quantity,
-        price: cartItem.price || cartItem.product.price,
-        discountedPrice: cartItem.discountedPrice,
-        productSnapshot: cartItem.product,
-        productVariationSnapshot: cartItem.productVariation,
-      });
+    try {
+      // Get current cart data from database to ensure integrity
+      const currentCart = await this.cartService.getCurrentUserCart(currentUserProfile);
 
-      // Deduct stock
-      if (cartItem.productVariationId) {
-        // Deduct from product variation stock
-        const productVariation = await this.productVariationRepository.findById(cartItem.productVariationId);
-        const newStock = productVariation.stock - cartItem.quantity;
-        await this.productVariationRepository.updateById(cartItem.productVariationId, {stock: newStock});
-      } else {
-        // Deduct from product stock
-        const product = await this.productRepository.findById(cartItem.productId);
-        const newStock = product.stock - cartItem.quantity;
-        await this.productRepository.updateById(cartItem.productId, {stock: newStock});
+      // Validate that the cart items from the request match the current cart
+      if (!currentCart.cart || !currentCart.cart.cartItems) {
+        throw new HttpErrors.BadRequest('No active cart found for the user');
       }
-    }
 
-    // Remove sold cart items from the cart
-    for (const cartItem of enabledCartItems) {
-      await this.cartItemRepository.deleteById(cartItem.id);
-    }
+      const dbCartItems = currentCart.cart.cartItems.filter((item: any) => item.enable === true);
+      const enabledCartItems = cartItems.filter(item => item.enable === true);
 
-    // Store form responses
-    for (const formResponse of formResponses) {
-      await this.purchaseOrderResponseRepository.create({
-        purchaseOrderId: purchaseOrder.id!,
-        pregunta: formResponse.pregunta,
-        respuesta: formResponse.respuesta,
-        formularioId: formResponse.formularioId,
-      });
-    }
+      if (dbCartItems.length !== enabledCartItems.length) {
+        throw new HttpErrors.BadRequest('Enabled cart items count mismatch between request and database');
+      }
 
-    // Set initial status to "pending_payment"
-    const pendingStatus = await this.purchaseOrderStatusRepository.findOne({
-      where: {key: 'pending_payment'}
-    });
-    if (pendingStatus) {
+      // Check each enabled cart item for integrity
+      for (const requestItem of enabledCartItems) {
+        const dbItem = dbCartItems.find((item: any) =>
+          item.productId === requestItem.productId &&
+          item.productVariationId === requestItem.productVariationId
+        );
+
+        if (!dbItem) {
+          throw new HttpErrors.BadRequest(
+            `Cart item not found in database: productId ${requestItem.productId}, variationId ${requestItem.productVariationId}`
+          );
+        }
+
+        if (dbItem.quantity !== requestItem.quantity) {
+          throw new HttpErrors.BadRequest(
+            `Quantity mismatch for productId ${requestItem.productId}: request ${requestItem.quantity}, database ${dbItem.quantity}`
+          );
+        }
+
+        if (dbItem.price !== requestItem.price) {
+          throw new HttpErrors.BadRequest(
+            `Price mismatch for productId ${requestItem.productId}: request ${requestItem.price}, database ${dbItem.price}`
+          );
+        }
+
+        if (dbItem.discountedPrice !== requestItem.discountedPrice) {
+          throw new HttpErrors.BadRequest(
+            `Discounted price mismatch for productId ${requestItem.productId}: request ${requestItem.discountedPrice}, database ${dbItem.discountedPrice}`
+          );
+        }
+
+        // Validate stock availability
+        if (requestItem.productVariationId) {
+          // Check variation stock
+          const variationStock = dbItem.productVariation?.stock ?? 0;
+          if (variationStock < requestItem.quantity) {
+            throw new HttpErrors.BadRequest(
+              `Insufficient stock for product variation ${requestItem.productVariationId}: available ${variationStock}, requested ${requestItem.quantity}`
+            );
+          }
+        } else {
+          // Check product stock
+          const productStock = dbItem.product?.stock ?? 0;
+          if (productStock < requestItem.quantity) {
+            throw new HttpErrors.BadRequest(
+              `Insufficient stock for product ${requestItem.productId}: available ${productStock}, requested ${requestItem.quantity}`
+            );
+          }
+        }
+      }
+
+      // Create the purchase order
+      const purchaseOrder = await this.purchaseOrderRepository.create({
+        usersId: currentUserProfile.id,
+        total,
+        paymentMethodSnapshot: paymentMethod,
+        currentStatusId: undefined, // Will be set after status creation
+      }, {transaction: tx});
+
+      // Create purchase order items and deduct stock (only for enabled cart items)
+      for (const cartItem of enabledCartItems) {
+        await this.purchaseOrderItemRepository.create({
+          purchaseOrderId: purchaseOrder.id!,
+          productId: cartItem.productId,
+          productVariationId: cartItem.productVariationId,
+          quantity: cartItem.quantity,
+          price: cartItem.price || cartItem.product.price,
+          discountedPrice: cartItem.discountedPrice,
+          productSnapshot: cartItem.product,
+          productVariationSnapshot: cartItem.productVariation,
+        }, {transaction: tx});
+
+        // Deduct stock
+        if (cartItem.productVariationId) {
+          // Deduct from product variation stock
+          const productVariation = await this.productVariationRepository.findById(
+            cartItem.productVariationId,
+            undefined,
+            {transaction: tx}
+          );
+          const newStock = productVariation.stock - cartItem.quantity;
+          await this.productVariationRepository.updateById(cartItem.productVariationId, {stock: newStock}, {transaction: tx});
+        } else {
+          // Deduct from product stock
+          const product = await this.productRepository.findById(
+            cartItem.productId,
+            undefined,
+            {transaction: tx}
+          );
+          const newStock = product.stock - cartItem.quantity;
+          await this.productRepository.updateById(cartItem.productId, {stock: newStock}, {transaction: tx});
+        }
+      }
+
+      // Remove sold cart items from the cart (use dbCartItems to avoid trusting request ids)
+      for (const cartItem of dbCartItems) {
+        await this.cartItemRepository.deleteById(cartItem.id, {transaction: tx});
+      }
+
+      // Store form responses
+      for (const formResponse of formResponses) {
+        await this.purchaseOrderResponseRepository.create({
+          purchaseOrderId: purchaseOrder.id!,
+          pregunta: formResponse.pregunta,
+          respuesta: formResponse.respuesta,
+          formularioId: formResponse.formularioId,
+        }, {transaction: tx});
+      }
+
+      // Set initial status to "pending_payment"
+      const pendingStatus = await this.purchaseOrderStatusRepository.findOne({
+        where: {key: 'pending_payment'}
+      }, {transaction: tx});
+
+      if (!pendingStatus) {
+        throw new HttpErrors.InternalServerError('Missing purchase order status: pending_payment');
+      }
+
       // Update the purchase order with current status
       await this.purchaseOrderRepository.updateById(purchaseOrder.id!, {
         currentStatusId: pendingStatus.id!
-      });
+      }, {transaction: tx});
 
       // Create history entry for the initial status
       await this.purchaseOrderHistoryRepository.create({
@@ -162,9 +195,13 @@ export class PurchaseOrderService {
         previousStatusId: undefined, // No previous status for new orders
         newStatusId: pendingStatus.id!,
         userId: undefined, // System-generated status change
-      });
-    }
+      }, {transaction: tx});
 
-    return purchaseOrder;
+      await tx.commit();
+      return purchaseOrder;
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
   }
 }

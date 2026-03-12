@@ -191,20 +191,9 @@ export class ProductControllerController {
     const products = await this.productRepository.find(filter);
     return Promise.all(products.map(async product => {
       product.categories = await this.productRepository.categories(product.id!).find();
-      //product.attachments = await this.productRepository.attachments(product.id!).find();
-      //product.attributes = await this.productRepository.attributes(product.id!).find();
-      //product.variations = await this.productRepository.variations(product.id!).find();
-
-      // Compute AttachmentId from ProductImages with lowest order and enabled=true
-      const productImages = await this.productImagesRepository.find({
-        where: {productId: product.id},
-      });
-      const enabledImages = productImages.filter(pi => pi.enabled !== false).sort((a, b) => (a.order || 0) - (b.order || 0));
-      const attachmentId = enabledImages.length > 0 ? enabledImages[0].attachmentId : 0;
-
+      const productDto = await this.productServiceService.prtoductDto(product);
       return {
-        ...product,
-        attachmentId: attachmentId,
+        ...productDto,
         ...(await this.getReviewSummary(product.id!)),
       } as ProductDto;
     }));

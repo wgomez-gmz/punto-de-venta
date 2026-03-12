@@ -105,6 +105,20 @@ export class ProductServiceService {
     return {price, discountedPrice, discountEnable};
   }
 
+  public normalizePricing(price?: number, discountedPrice?: number, discountEnable?: boolean) {
+    const originalPrice = price;
+    const finalPrice = discountEnable && discountedPrice !== undefined
+      ? discountedPrice
+      : price;
+
+    return {
+      originalPrice,
+      finalPrice,
+      discountedPrice: discountEnable ? discountedPrice : undefined,
+      discountEnable: Boolean(discountEnable),
+    };
+  }
+
   public async findById(id: number) {
     const product = await this.productRepository.findById(id);//, filter
     // Load category ids
@@ -146,6 +160,7 @@ export class ProductServiceService {
     let productVariationDto: any = undefined;
 
     const {price, discountedPrice, discountEnable} = this.getPricingVariation(productVariation);
+    const normalizedPricing = this.normalizePricing(price, discountedPrice, discountEnable);
 
     if (productVariation) {
       productVariationDto = {
@@ -153,12 +168,14 @@ export class ProductServiceService {
         combination: productVariation.combination,
         stock: productVariation.stock,
         price: price,
-        discountedPrice: discountedPrice,
+        originalPrice: normalizedPricing.originalPrice,
+        finalPrice: normalizedPricing.finalPrice,
+        discountedPrice: normalizedPricing.discountedPrice,
         discountStartDate: productVariation.discountStartDate,
         discountEndDate: productVariation.discountEndDate,
         sku: productVariation.sku,
         discountScheduled: productVariation.discountScheduled,
-        discountEnable: discountEnable,
+        discountEnable: normalizedPricing.discountEnable,
       };
     }
     return productVariationDto;
@@ -191,6 +208,7 @@ export class ProductServiceService {
 
       // Obtener valor del prodcuto
       const {price, discountedPrice, discountEnable} = this.getPricingInfo(product, undefined, false);
+      const normalizedPricing = this.normalizePricing(price, discountedPrice, discountEnable);
       // Map product to ProductListDto format
       productDto = {
         id: product.id,
@@ -202,8 +220,10 @@ export class ProductServiceService {
         completeDescription: product.completeDescription,
         description: product.description,
         barcode: product.barcode,
-        price: product.price,
-        discountedPrice: product.discountedPrice,
+        price: price!,
+        originalPrice: normalizedPricing.originalPrice,
+        finalPrice: normalizedPricing.finalPrice,
+        discountedPrice: normalizedPricing.discountedPrice,
         discountStartDate: product.discountStartDate,
         discountEndDate: product.discountEndDate,
         sku: product.sku,
@@ -217,7 +237,7 @@ export class ProductServiceService {
         attributes: product.attributes,
         variations: productVariationsDto,
         attachmentId: attachmentId,
-        discountEnable: discountEnable,
+        discountEnable: normalizedPricing.discountEnable,
       };
     }
     return productDto;

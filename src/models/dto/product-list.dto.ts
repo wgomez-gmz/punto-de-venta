@@ -57,6 +57,16 @@ export class ProductDto {
   @property({
     type: 'number',
   })
+  originalPrice?: number;
+
+  @property({
+    type: 'number',
+  })
+  finalPrice?: number;
+
+  @property({
+    type: 'number',
+  })
   discountedPrice?: number;
 
   @property({

@@ -63,6 +63,16 @@ export class PurchaseOrder extends BaseEntity {
   })
   paymentMethodSnapshot: any;
 
+  @property({
+    type: 'number',
+  })
+  paymentIntentId?: number;
+
+  @property({
+    type: 'object',
+  })
+  paymentIntentSnapshot?: any;
+
   constructor(data?: Partial<PurchaseOrder>) {
     super(data);
   }

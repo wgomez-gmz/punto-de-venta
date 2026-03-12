@@ -35,3 +35,4 @@ export * from './purchase-order.controller';
 export * from './purchase-order-status.controller';
 export * from './purchase-order-response.controller';
 export * from './purchase-order-item.controller';
+export * from './payment-gateway-admin.controller';

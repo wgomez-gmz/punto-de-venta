@@ -4,7 +4,7 @@ import {HttpErrors} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
 import {CreatePurchaseOrderDto} from '../models/dto/create-purchase-order.dto';
 import {PurchaseOrder} from '../models/purchase-order.model';
-import {CartItemRepository, CouponRepository, CouponUsageRepository, PurchaseOrderRepository} from '../repositories';
+import {CartItemRepository, CouponRepository, CouponUsageRepository, PurchaseOrderRepository, UsersRepository} from '../repositories';
 import {ProductVariationRepository} from '../repositories/product-variation.repository';
 import {ProductRepository} from '../repositories/product.repository';
 import {PurchaseOrderHistoryRepository} from '../repositories/purchase-order-history.repository';
@@ -12,6 +12,7 @@ import {PurchaseOrderItemRepository} from '../repositories/purchase-order-item.r
 import {PurchaseOrderResponseRepository} from '../repositories/purchase-order-response.repository';
 import {PurchaseOrderStatusRepository} from '../repositories/purchase-order-status.repository';
 import {CartServiceService} from './cart-service.service';
+import {PaymentGatewayClientService} from './payment-gateway-client.service';
 
 @injectable({scope: BindingScope.TRANSIENT})
 export class PurchaseOrderService {
@@ -36,7 +37,10 @@ export class PurchaseOrderService {
     public couponRepository: CouponRepository,
     @repository(CouponUsageRepository)
     public couponUsageRepository: CouponUsageRepository,
+    @repository(UsersRepository)
+    public usersRepository: UsersRepository,
     @service() public cartService: CartServiceService,
+    @service() public paymentGatewayClientService: PaymentGatewayClientService,
   ) { }
 
   async createPurchaseOrder(
@@ -183,6 +187,40 @@ export class PurchaseOrderService {
         }
       }
 
+      const currentUser = await this.usersRepository.findById(Number(currentUserProfile.id), {
+        include: [{relation: 'people'}],
+      }, {transaction: tx});
+
+      const provider = await this.paymentGatewayClientService.ensureProvider(paymentMethod);
+      const paymentIntent = await this.paymentGatewayClientService.createPaymentIntent({
+        providerKey: provider.key,
+        merchantReference: `PO-${purchaseOrder.id}`,
+        externalOrderId: String(purchaseOrder.id),
+        amount: calculatedTotal,
+        currency: 'MXN',
+        customerId: String(currentUserProfile.id),
+        customerEmail: currentUser.people?.email || currentUser.username,
+        description: `Orden ${purchaseOrder.id} del ecommerce`,
+        metadata: {
+          purchaseOrderId: purchaseOrder.id,
+          userId: Number(currentUserProfile.id),
+          paymentMethodId: paymentMethod?.id,
+          paymentMethodName: paymentMethod?.name,
+          subtotal,
+          discountTotal,
+          couponCode: couponValidation?.coupon?.code,
+        },
+        callbackUrls: {
+          successUrl: `${process.env.PAYMENT_SUCCESS_URL || 'http://127.0.0.1:5000/client/payment-return'}?purchaseOrderId=${purchaseOrder.id}&flow=success`,
+          cancelUrl: `${process.env.PAYMENT_CANCEL_URL || 'http://127.0.0.1:5000/client/payment-return'}?purchaseOrderId=${purchaseOrder.id}&flow=cancel`,
+        },
+      });
+
+      await this.purchaseOrderRepository.updateById(purchaseOrder.id!, {
+        paymentIntentId: paymentIntent.id,
+        paymentIntentSnapshot: paymentIntent,
+      }, {transaction: tx});
+
       // Remove sold cart items from the cart (use dbCartItems to avoid trusting request ids)
       for (const cartItem of dbCartItems) {
         await this.cartItemRepository.deleteById(cartItem.id, {transaction: tx});
@@ -234,11 +272,188 @@ export class PurchaseOrderService {
       }
 
       await tx.commit();
-      return purchaseOrder;
+      return this.purchaseOrderRepository.findById(purchaseOrder.id!);
     } catch (err) {
       await tx.rollback();
       throw err;
     }
+  }
+
+  async confirmPurchaseOrderPayment(
+    currentUserProfile: UserProfile,
+    purchaseOrderId: number,
+    body: {providerReference?: string; metadata?: object},
+  ): Promise<PurchaseOrder> {
+    const order = await this.purchaseOrderRepository.findById(purchaseOrderId);
+    this.ensureOrderOwnership(order, currentUserProfile);
+
+    if (!order.paymentIntentId) {
+      throw new HttpErrors.BadRequest('La orden no tiene un intent de pago asociado.');
+    }
+
+    const paymentIntent = await this.paymentGatewayClientService.confirmPaymentIntent(
+      order.paymentIntentId,
+      body,
+    );
+
+    await this.purchaseOrderRepository.updateById(purchaseOrderId, {
+      paymentIntentSnapshot: paymentIntent,
+    });
+
+    await this.updateOrderStatusByPaymentIntent(order, paymentIntent);
+    return this.getOrderDetailForUser(purchaseOrderId, currentUserProfile);
+  }
+
+  async cancelPurchaseOrderPayment(
+    currentUserProfile: UserProfile,
+    purchaseOrderId: number,
+    body: {reason?: string},
+  ): Promise<PurchaseOrder> {
+    const order = await this.purchaseOrderRepository.findById(purchaseOrderId);
+    this.ensureOrderOwnership(order, currentUserProfile);
+
+    if (!order.paymentIntentId) {
+      throw new HttpErrors.BadRequest('La orden no tiene un intent de pago asociado.');
+    }
+
+    const paymentIntent = await this.paymentGatewayClientService.cancelPaymentIntent(
+      order.paymentIntentId,
+      body,
+    );
+
+    await this.purchaseOrderRepository.updateById(purchaseOrderId, {
+      paymentIntentSnapshot: paymentIntent,
+    });
+
+    await this.updateOrderStatusByPaymentIntent(order, paymentIntent);
+    return this.getOrderDetailForUser(purchaseOrderId, currentUserProfile);
+  }
+
+  async retryPurchaseOrderPayment(
+    currentUserProfile: UserProfile,
+    purchaseOrderId: number,
+    body: {paymentMethod?: any},
+  ): Promise<PurchaseOrder> {
+    const order = await this.purchaseOrderRepository.findById(purchaseOrderId, {
+      include: [
+        {relation: 'currentStatus'},
+        {relation: 'purchaseOrderItems'},
+      ],
+    });
+    this.ensureOrderOwnership(order, currentUserProfile);
+
+    const currentStatusKey = (order as any).currentStatus?.key;
+    if (!['pending_payment', 'cancelled'].includes(currentStatusKey)) {
+      throw new HttpErrors.UnprocessableEntity('Solo puedes reintentar el pago en ordenes pendientes o canceladas.');
+    }
+
+    const selectedPaymentMethod = body.paymentMethod || order.paymentMethodSnapshot;
+    if (!selectedPaymentMethod?.name) {
+      throw new HttpErrors.BadRequest('Debes indicar un metodo de pago valido.');
+    }
+
+    if (order.paymentIntentId) {
+      try {
+        await this.paymentGatewayClientService.cancelPaymentIntent(order.paymentIntentId, {
+          reason: 'El cliente decidio reintentar o cambiar el metodo de pago.',
+        });
+      } catch (error) {
+        // Ignored on purpose: old intents may already be closed or expired.
+      }
+    }
+
+    const currentUser = await this.usersRepository.findById(Number(currentUserProfile.id), {
+      include: [{relation: 'people'}],
+    });
+
+    const provider = await this.paymentGatewayClientService.ensureProvider(selectedPaymentMethod);
+    const paymentIntent = await this.paymentGatewayClientService.createPaymentIntent({
+      providerKey: provider.key,
+      merchantReference: `PO-${order.id}`,
+      externalOrderId: String(order.id),
+      amount: Number(order.total || 0),
+      currency: 'MXN',
+      customerId: String(currentUserProfile.id),
+      customerEmail: currentUser.people?.email || currentUser.username,
+      description: `Reintento de orden ${order.id} del ecommerce`,
+      metadata: {
+        purchaseOrderId: order.id,
+        userId: Number(currentUserProfile.id),
+        paymentMethodId: selectedPaymentMethod?.id,
+        paymentMethodName: selectedPaymentMethod?.name,
+        subtotal: order.subtotal,
+        discountTotal: order.discountTotal,
+        couponCode: order.couponCode,
+        retry: true,
+      },
+      callbackUrls: {
+        successUrl: `${process.env.PAYMENT_SUCCESS_URL || 'http://127.0.0.1:5000/client/payment-return'}?purchaseOrderId=${order.id}&flow=success`,
+        cancelUrl: `${process.env.PAYMENT_CANCEL_URL || 'http://127.0.0.1:5000/client/payment-return'}?purchaseOrderId=${order.id}&flow=cancel`,
+      },
+    });
+
+    await this.purchaseOrderRepository.updateById(order.id!, {
+      paymentMethodSnapshot: selectedPaymentMethod,
+      paymentIntentId: paymentIntent.id,
+      paymentIntentSnapshot: paymentIntent,
+    });
+
+    return this.getOrderDetailForUser(order.id!, currentUserProfile);
+  }
+
+  async syncPurchaseOrderPaymentFromGateway(body: {
+    paymentIntentId: number;
+    externalOrderId?: string;
+    merchantReference?: string;
+    status: string;
+    providerKey: string;
+    providerReference?: string;
+    captureReference?: string;
+    refundedAmount?: number;
+    amount: number;
+    currency: string;
+    providerPayload?: object;
+  }): Promise<PurchaseOrder> {
+    let order: PurchaseOrder | null = null;
+
+    if (body.externalOrderId) {
+      order = await this.purchaseOrderRepository.findById(Number(body.externalOrderId));
+    }
+
+    if (!order && body.paymentIntentId) {
+      order = await this.purchaseOrderRepository.findOne({
+        where: {paymentIntentId: body.paymentIntentId},
+      });
+    }
+
+    if (!order) {
+      throw new HttpErrors.NotFound('No se encontro una orden asociada al intent de pago.');
+    }
+
+    const mergedPaymentIntentSnapshot = {
+      ...(order.paymentIntentSnapshot || {}),
+      id: body.paymentIntentId,
+      providerKey: body.providerKey,
+      externalOrderId: body.externalOrderId,
+      merchantReference: body.merchantReference,
+      status: body.status,
+      providerReference: body.providerReference,
+      captureReference: body.captureReference,
+      refundedAmount: body.refundedAmount,
+      amount: body.amount,
+      currency: body.currency,
+      providerPayload: body.providerPayload,
+    };
+
+    await this.purchaseOrderRepository.updateById(order.id!, {
+      paymentIntentId: body.paymentIntentId,
+      paymentIntentSnapshot: mergedPaymentIntentSnapshot,
+    });
+
+    await this.updateOrderStatusByPaymentIntent(order, mergedPaymentIntentSnapshot);
+    return this.purchaseOrderRepository.findById(order.id!, {
+      include: [{relation: 'currentStatus'}],
+    });
   }
 
   private async validateCoupon(code: string, subtotal: number, usersId: number): Promise<any> {
@@ -285,5 +500,61 @@ export class PurchaseOrderService {
       coupon,
       discountAmount: Number(discountAmount.toFixed(2)),
     };
+  }
+
+  private ensureOrderOwnership(order: PurchaseOrder, currentUserProfile: UserProfile): void {
+    if (Number(order.usersId) !== Number(currentUserProfile.id)) {
+      throw new HttpErrors.Forbidden('No tienes acceso a esta orden.');
+    }
+  }
+
+  private async updateOrderStatusByPaymentIntent(
+    order: PurchaseOrder,
+    paymentIntent: any,
+  ): Promise<void> {
+    const statusKey = ['paid', 'authorized'].includes(paymentIntent.status)
+      ? 'payment_confirmed'
+      : paymentIntent.status === 'canceled'
+        ? 'cancelled'
+        : ['refunded', 'partially_refunded'].includes(paymentIntent.status)
+          ? 'refunded'
+          : paymentIntent.status === 'failed'
+            ? 'cancelled'
+        : 'pending_payment';
+
+    const targetStatus = await this.purchaseOrderStatusRepository.findOne({
+      where: {key: statusKey},
+    });
+
+    if (!targetStatus?.id || targetStatus.id === order.currentStatusId) {
+      return;
+    }
+
+    await this.purchaseOrderRepository.updateById(order.id!, {
+      currentStatusId: targetStatus.id,
+    });
+
+    await this.purchaseOrderHistoryRepository.create({
+      purchaseOrderId: order.id!,
+      previousStatusId: order.currentStatusId,
+      newStatusId: targetStatus.id,
+      userId: undefined,
+    });
+  }
+
+  async getOrderDetailForUser(
+    purchaseOrderId: number,
+    currentUserProfile: UserProfile,
+  ): Promise<PurchaseOrder> {
+    const order = await this.purchaseOrderRepository.findById(purchaseOrderId, {
+      include: [
+        {relation: 'purchaseOrderItems'},
+        {relation: 'currentStatus'},
+        {relation: 'purchaseOrderResponses'},
+      ],
+    });
+
+    this.ensureOrderOwnership(order, currentUserProfile);
+    return order;
   }
 }

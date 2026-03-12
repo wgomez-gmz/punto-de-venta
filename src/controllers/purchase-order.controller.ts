@@ -12,6 +12,9 @@ import {
   del,
   get,
   getModelSchemaRef,
+  HttpErrors,
+  Request,
+  RestBindings,
   param,
   patch,
   post,
@@ -54,6 +57,141 @@ export class PurchaseOrderController {
     @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
   ): Promise<PurchaseOrder> {
     return this.purchaseOrderService.createPurchaseOrder(currentUserProfile, createPurchaseOrderDto);
+  }
+
+  @post('/purchase-orders/{id}/payment/confirm')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Purchase order payment confirmed',
+    content: {'application/json': {schema: getModelSchemaRef(PurchaseOrder, {includeRelations: true})}},
+  })
+  async confirmPayment(
+    @param.path.number('id') id: number,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              providerReference: {type: 'string'},
+              metadata: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {providerReference?: string; metadata?: object},
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+  ): Promise<PurchaseOrder> {
+    return this.purchaseOrderService.confirmPurchaseOrderPayment(currentUserProfile, id, body);
+  }
+
+  @post('/purchase-orders/{id}/payment/cancel')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Purchase order payment canceled',
+    content: {'application/json': {schema: getModelSchemaRef(PurchaseOrder, {includeRelations: true})}},
+  })
+  async cancelPayment(
+    @param.path.number('id') id: number,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              reason: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {reason?: string},
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+  ): Promise<PurchaseOrder> {
+    return this.purchaseOrderService.cancelPurchaseOrderPayment(currentUserProfile, id, body);
+  }
+
+  @post('/purchase-orders/{id}/payment/retry')
+  @authenticate('jwt')
+  @response(200, {
+    description: 'Purchase order payment retried',
+    content: {'application/json': {schema: getModelSchemaRef(PurchaseOrder, {includeRelations: true})}},
+  })
+  async retryPayment(
+    @param.path.number('id') id: number,
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            properties: {
+              paymentMethod: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {paymentMethod?: object},
+    @inject(SecurityBindings.USER) currentUserProfile: UserProfile,
+  ): Promise<PurchaseOrder> {
+    return this.purchaseOrderService.retryPurchaseOrderPayment(currentUserProfile, id, body);
+  }
+
+  @post('/internal/payment-intents/reconciled')
+  @response(200, {
+    description: 'Purchase order synchronized from payment gateway',
+    content: {'application/json': {schema: getModelSchemaRef(PurchaseOrder, {includeRelations: true})}},
+  })
+  async syncPaymentIntent(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['paymentIntentId', 'providerKey', 'status', 'amount', 'currency'],
+            properties: {
+              paymentIntentId: {type: 'number'},
+              externalOrderId: {type: 'string'},
+              merchantReference: {type: 'string'},
+              status: {type: 'string'},
+              providerKey: {type: 'string'},
+              providerReference: {type: 'string'},
+              captureReference: {type: 'string'},
+              refundedAmount: {type: 'number'},
+              amount: {type: 'number'},
+              currency: {type: 'string'},
+              providerPayload: {type: 'object'},
+            },
+          },
+        },
+      },
+    })
+    body: {
+      paymentIntentId: number;
+      externalOrderId?: string;
+      merchantReference?: string;
+      status: string;
+      providerKey: string;
+      providerReference?: string;
+      captureReference?: string;
+      refundedAmount?: number;
+      amount: number;
+      currency: string;
+      providerPayload?: object;
+    },
+    @inject(RestBindings.Http.REQUEST) request: Request,
+  ): Promise<PurchaseOrder> {
+    const expectedSecret = process.env.ECOMMERCE_PAYMENT_WEBHOOK_SECRET || '';
+    const receivedSecret = typeof request.headers['x-payment-gateway-secret'] === 'string'
+      ? request.headers['x-payment-gateway-secret']
+      : '';
+
+    if (expectedSecret && receivedSecret !== expectedSecret) {
+      throw new HttpErrors.Unauthorized('Invalid payment gateway secret.');
+    }
+
+    return this.purchaseOrderService.syncPurchaseOrderPaymentFromGateway(body);
   }
 
   @get('/purchase-orders/count')

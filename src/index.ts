@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import {ApplicationConfig, PuntoDeVentaApplication} from './application';
 
 export * from './application';

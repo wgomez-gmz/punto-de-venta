@@ -31,12 +31,13 @@ export class UserServiceService implements UserService<Users, Credentials> {
         id: true,
         username: true,
         status: true,
+        emailVerified: true,
         roleId: true,
         //clientId: true,
         //acceptTerms: true,
         //contactXId:true
       },
-      where: {username: credentials.username},
+      where: {username: String(credentials.username || '').trim().toLowerCase()},
       //where: {email: credentials.email},
       include: [{
         relation: 'people',
@@ -66,13 +67,16 @@ export class UserServiceService implements UserService<Users, Credentials> {
     });
 
     if (!foundUser) {
-      throw new HttpErrors.NotFound(
-        `Usuario ${credentials.username} no encontrado.`,
-      );
+      throw new HttpErrors.Unauthorized(invalidCredentialsError);
     } else {
+      if (foundUser.emailVerified === false) {
+        throw new HttpErrors.Unauthorized(
+          'Debes verificar tu correo electronico antes de iniciar sesion.',
+        );
+      }
       if (foundUser.status == 0) {
         throw new HttpErrors.Unauthorized(
-          `Usuario ${credentials.username} inactivo.`,
+          'Tu cuenta no esta disponible para iniciar sesion.',
         );
       }
     }
@@ -90,7 +94,7 @@ export class UserServiceService implements UserService<Users, Credentials> {
     );
 
     if (!passwordMatched) {
-      throw new HttpErrors.Unauthorized('Las credenciales no son correctas.');
+      throw new HttpErrors.Unauthorized(invalidCredentialsError);
     }
     return foundUser;
   }

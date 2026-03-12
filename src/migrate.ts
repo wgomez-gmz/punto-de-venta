@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import {PuntoDeVentaApplication} from './application';
 
 export async function migrate(args: string[]) {

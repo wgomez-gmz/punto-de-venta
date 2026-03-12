@@ -217,6 +217,12 @@ export class PurchaseOrderStatusController {
       userId: currentUserProfile.id, // Track who made the change
     });
 
+    await this.purchaseOrderService.sendOrderStatusNotification(
+      updateStatusDto.purchaseOrderId,
+      status.name,
+      status.key === 'payment_confirmed',
+    );
+
     return {
       message: 'Purchase order status updated successfully',
       success: true,

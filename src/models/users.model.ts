@@ -47,6 +47,17 @@ export class Users extends BaseEntity {
   })
   email?: string;
 
+  @property({
+    type: 'boolean',
+    default: false,
+  })
+  emailVerified?: boolean;
+
+  @property({
+    type: 'date',
+  })
+  emailVerifiedAt?: string;
+
   /**
    * User credentials relationship
    */

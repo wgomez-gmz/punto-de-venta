@@ -4,6 +4,7 @@ import {TokenService, UserService} from '@loopback/authentication';
 import {BindingKey} from '@loopback/context';
 import {Users} from './models';
 //import {EmailManager} from './services/email-service';
+import {EmailService} from './services/email.service';
 import {PasswordHasher} from './services/hash.password.bcryptjs';
 import {Credentials} from './specs/user.specs';
 
@@ -42,6 +43,12 @@ export namespace PasswordHasherBindings {
 export namespace UserServiceBindings {
   export const USER_SERVICE = BindingKey.create<UserService<Users, Credentials>>(
     'services.user.service',
+  );
+}
+
+export namespace EmailServiceBindings {
+  export const EMAIL_SERVICE = BindingKey.create<EmailService>(
+    'services.email.service',
   );
 }
 

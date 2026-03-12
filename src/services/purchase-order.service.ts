@@ -12,6 +12,7 @@ import {PurchaseOrderItemRepository} from '../repositories/purchase-order-item.r
 import {PurchaseOrderResponseRepository} from '../repositories/purchase-order-response.repository';
 import {PurchaseOrderStatusRepository} from '../repositories/purchase-order-status.repository';
 import {CartServiceService} from './cart-service.service';
+import {EmailService} from './email.service';
 import {PaymentGatewayClientService} from './payment-gateway-client.service';
 
 @injectable({scope: BindingScope.TRANSIENT})
@@ -40,6 +41,7 @@ export class PurchaseOrderService {
     @repository(UsersRepository)
     public usersRepository: UsersRepository,
     @service() public cartService: CartServiceService,
+    @service() public emailService: EmailService,
     @service() public paymentGatewayClientService: PaymentGatewayClientService,
   ) { }
 
@@ -272,7 +274,11 @@ export class PurchaseOrderService {
       }
 
       await tx.commit();
-      return this.purchaseOrderRepository.findById(purchaseOrder.id!);
+      const savedOrder = await this.purchaseOrderRepository.findById(purchaseOrder.id!, {
+        include: [{relation: 'currentStatus'}],
+      });
+      await this.sendOrderCreatedNotification(savedOrder);
+      return savedOrder;
     } catch (err) {
       await tx.rollback();
       throw err;
@@ -540,6 +546,8 @@ export class PurchaseOrderService {
       newStatusId: targetStatus.id,
       userId: undefined,
     });
+
+    await this.sendOrderStatusNotification(order.id!, targetStatus.name, statusKey === 'payment_confirmed');
   }
 
   async getOrderDetailForUser(
@@ -556,5 +564,69 @@ export class PurchaseOrderService {
 
     this.ensureOrderOwnership(order, currentUserProfile);
     return order;
+  }
+
+  async sendOrderStatusNotification(
+    purchaseOrderId: number,
+    statusName?: string,
+    paymentConfirmed?: boolean,
+  ): Promise<void> {
+    const order = await this.purchaseOrderRepository.findById(purchaseOrderId, {
+      include: [{relation: 'currentStatus'}],
+    });
+    const user = await this.usersRepository.findById(Number(order.usersId), {
+      include: [{relation: 'people'}],
+    });
+
+    const recipientEmail = (user as any).people?.email || user.email || user.username;
+    if (!recipientEmail) {
+      return;
+    }
+
+    const customerName = [
+      (user as any).people?.name,
+      (user as any).people?.firstLastName,
+    ].filter(Boolean).join(' ').trim() || user.username;
+
+    const payload = {
+      orderId: order.id!,
+      customerName,
+      total: Number(order.total || 0),
+      statusName: statusName || (order as any).currentStatus?.name,
+      paymentMethodName: order.paymentMethodSnapshot?.displayName,
+      detailUrl: `${process.env.FRONTEND_APP_URL || 'http://localhost:5000'}/client/orders/${order.id}`,
+    };
+
+    if (paymentConfirmed) {
+      await this.emailService.sendOrderPaymentConfirmedEmail(recipientEmail, payload);
+      return;
+    }
+
+    await this.emailService.sendOrderStatusEmail(recipientEmail, payload);
+  }
+
+  private async sendOrderCreatedNotification(order: PurchaseOrder): Promise<void> {
+    const user = await this.usersRepository.findById(Number(order.usersId), {
+      include: [{relation: 'people'}],
+    });
+
+    const recipientEmail = (user as any).people?.email || user.email || user.username;
+    if (!recipientEmail) {
+      return;
+    }
+
+    const customerName = [
+      (user as any).people?.name,
+      (user as any).people?.firstLastName,
+    ].filter(Boolean).join(' ').trim() || user.username;
+
+    await this.emailService.sendOrderCreatedEmail(recipientEmail, {
+      orderId: order.id!,
+      customerName,
+      total: Number(order.total || 0),
+      statusName: (order as any).currentStatus?.name,
+      paymentMethodName: order.paymentMethodSnapshot?.displayName,
+      detailUrl: `${process.env.FRONTEND_APP_URL || 'http://localhost:5000'}/client/orders/${order.id}`,
+    });
   }
 }

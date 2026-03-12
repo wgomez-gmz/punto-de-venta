@@ -10,8 +10,9 @@ import {
 } from '@loopback/rest-explorer';
 import {ServiceMixin} from '@loopback/service-proxy';
 import path from 'path';
-import {PasswordHasherBindings, UserServiceBindings} from './keys';
+import {EmailServiceBindings, PasswordHasherBindings, UserServiceBindings} from './keys';
 import {MySequence} from './sequence';
+import {EmailService} from './services/email.service';
 import {BcryptHasher} from './services/hash.password.bcryptjs';
 import {UserServiceService} from './services/user-service.service';
 
@@ -36,6 +37,7 @@ export class PuntoDeVentaApplication extends BootMixin(
 
     // Bind user service
     this.bind(UserServiceBindings.USER_SERVICE).toClass(UserServiceService);
+    this.bind(EmailServiceBindings.EMAIL_SERVICE).toClass(EmailService);
 
     /*// Bind datasource
     this.bind('datasources.db').toClass(DbDataSource);*/

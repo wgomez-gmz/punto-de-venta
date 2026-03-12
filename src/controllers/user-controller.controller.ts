@@ -21,15 +21,17 @@ import {
   response,
 } from '@loopback/rest';
 import {authenticate} from '@loopback/authentication';
+import {randomBytes, createHash} from 'crypto';
 import {omit} from 'lodash';
 import {SecurityBindings, UserProfile} from '@loopback/security';
-import {PasswordHasherBindings, TokenServiceBindings, UserServiceBindings} from '../keys';
+import {EmailServiceBindings, PasswordHasherBindings, TokenServiceBindings, UserServiceBindings} from '../keys';
 import {People, Role, UserPermission, Users} from '../models';
 import {CreateCustomerDto} from '../models/dto/create-customer.dto';
-import {PermissionRepository, UserPermissionRepository, UsersRepository} from '../repositories';
+import {EmailVerificationTokenRepository, PasswordResetTokenRepository, PermissionRepository, UserPermissionRepository, UsersRepository} from '../repositories';
 import {RoleRepository} from '../repositories/role.repository';
 import {UserAddressRepository} from '../repositories/user-address.repository';
 import {PasswordHasher} from '../services/hash.password.bcryptjs';
+import {EmailService} from '../services/email.service';
 import {Credentials, requestBodyCreateUser, userData} from '../specs/user.specs';
 
 export class UserControllerController {
@@ -44,12 +46,18 @@ export class UserControllerController {
     public roleRepository: RoleRepository,
     @repository(UserAddressRepository)
     public userAddressRepository: UserAddressRepository,
+    @repository(PasswordResetTokenRepository)
+    public passwordResetTokenRepository: PasswordResetTokenRepository,
+    @repository(EmailVerificationTokenRepository)
+    public emailVerificationTokenRepository: EmailVerificationTokenRepository,
     @inject(PasswordHasherBindings.PASSWORD_HASHER)
     public passwordHasher: PasswordHasher,
     @inject(UserServiceBindings.USER_SERVICE)
     public userService: UserService<Users, Credentials>,
     @inject(TokenServiceBindings.TOKEN_SERVICE)
     public jwtService: TokenService,
+    @inject(EmailServiceBindings.EMAIL_SERVICE)
+    public emailService: EmailService,
   ) { }
 
   @post('/users')
@@ -109,8 +117,19 @@ export class UserControllerController {
 
   @post('/users/customer')
   @response(200, {
-    description: 'Customer user model instance',
-    content: {'application/json': {schema: getModelSchemaRef(Users)}},
+    description: 'Customer registration result',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            message: {type: 'string'},
+            requiresEmailVerification: {type: 'boolean'},
+            verificationUrl: {type: 'string'},
+          },
+        },
+      },
+    },
   })
   async createCustomer(
     @requestBody({
@@ -133,13 +152,14 @@ export class UserControllerController {
       },
     })
     customerData: CreateCustomerDto,
-  ): Promise<Users> {
+  ): Promise<{message: string; requiresEmailVerification: boolean; verificationUrl?: string}> {
+    const normalizedEmail = String(customerData.email || '').trim().toLowerCase();
     // Check if username already exists (using email as username)
     const foundUser = await this.usersRepository.findOne({
-      where: {username: customerData.email},
+      where: {username: normalizedEmail},
     });
     if (foundUser) {
-      throw new HttpErrors[406](`Ya existe el usuario: ${customerData.email}`);
+      throw new HttpErrors[406](`Ya existe el usuario: ${normalizedEmail}`);
     }
 
     // Find customer role
@@ -152,9 +172,11 @@ export class UserControllerController {
 
     // Create user
     const userData = {
-      username: customerData.email,
+      username: normalizedEmail,
+      email: normalizedEmail,
       roleId: customerRole.id,
-      status: 1, // Active
+      status: 1,
+      emailVerified: false,
     };
     const savedUser = await this.usersRepository.create(userData);
 
@@ -171,11 +193,21 @@ export class UserControllerController {
       secondLastName: customerData.secondLastName?.toUpperCase(),
       birthday: customerData.birthday,
       phone: customerData.phone,
-      email: customerData.email,
+      email: normalizedEmail,
     };
     await this.usersRepository.people(savedUser.id).create(peopleData);
 
-    return savedUser;
+    const verificationUrl = await this.issueEmailVerificationToken(
+      savedUser.id!,
+      normalizedEmail,
+      `${peopleData.name} ${peopleData.firstLastName}`.trim(),
+    );
+
+    return {
+      message: 'Cuenta creada correctamente. Revisa tu correo para verificar tu cuenta antes de iniciar sesion.',
+      requiresEmailVerification: true,
+      ...(this.emailService.isPreviewModeEnabled() ? {verificationUrl} : {}),
+    };
   }
 
   @post('/users/login')
@@ -222,6 +254,351 @@ export class UserControllerController {
     const role = (user as any).role || null;
 
     return {token, user, role};
+  }
+
+  @post('/users/forgot-password')
+  @response(200, {
+    description: 'Creates a password reset token',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            message: {type: 'string'},
+            resetUrl: {type: 'string'},
+            expiresAt: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async requestPasswordReset(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email'],
+            properties: {
+              email: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {email: string},
+  ): Promise<{message: string; resetUrl?: string; expiresAt?: string}> {
+    const email = String(body.email || '').trim().toLowerCase();
+    if (!email) {
+      throw new HttpErrors.BadRequest('Debes proporcionar un correo electronico valido.');
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: {
+        or: [
+          {username: email},
+          {email},
+        ],
+      },
+      include: [{relation: 'people'}],
+    });
+
+    if (!user) {
+      return {
+        message: 'Si el correo esta registrado, recibiras un enlace para restablecer tu contrasena.',
+      };
+    }
+
+    await this.passwordResetTokenRepository.updateAll(
+      {
+        status: 0,
+        updateDate: new Date().toISOString(),
+      },
+      {
+        usersId: user.id,
+        usedAt: undefined,
+        status: 1,
+      },
+    );
+
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60).toISOString();
+
+    await this.passwordResetTokenRepository.create({
+      usersId: user.id!,
+      tokenHash,
+      expiresAt,
+      requestedFor: email,
+      status: 1,
+    });
+
+    const frontendBaseUrl = process.env.FRONTEND_APP_URL || 'http://localhost:5000';
+    const resetUrl = `${frontendBaseUrl}/client/reset-password?token=${rawToken}`;
+
+    const recipientEmail = (user as any).people?.email || user.email || user.username;
+    const recipientName = [
+      (user as any).people?.name,
+      (user as any).people?.firstLastName,
+    ].filter(Boolean).join(' ').trim() || user.username;
+
+    await this.emailService.sendPasswordResetEmail(recipientEmail, recipientName, resetUrl);
+
+    return {
+      message: 'Si el correo esta registrado, recibiras un enlace para restablecer tu contrasena.',
+      ...(this.emailService.isPreviewModeEnabled() ? {resetUrl, expiresAt} : {}),
+    };
+  }
+
+  @get('/users/verify-email/validate')
+  @response(200, {
+    description: 'Validates an email verification token',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            valid: {type: 'boolean'},
+            expiresAt: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async validateEmailVerificationToken(
+    @param.query.string('token') token: string,
+  ): Promise<{valid: boolean; expiresAt?: string}> {
+    const tokenRecord = await this.findValidEmailVerificationToken(token);
+    return {
+      valid: Boolean(tokenRecord),
+      expiresAt: tokenRecord?.expiresAt,
+    };
+  }
+
+  @post('/users/verify-email')
+  @response(200, {
+    description: 'Verifies a user email address',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            message: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async verifyEmail(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['token'],
+            properties: {
+              token: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {token: string},
+  ): Promise<{message: string}> {
+    const tokenRecord = await this.findValidEmailVerificationToken(body.token);
+    if (!tokenRecord) {
+      throw new HttpErrors.BadRequest('El enlace de verificacion no es valido o ya expiro.');
+    }
+
+    const user = await this.usersRepository.findById(tokenRecord.usersId, {
+      include: [{relation: 'people'}],
+    });
+
+    if (user.emailVerified) {
+      await this.emailVerificationTokenRepository.updateById(tokenRecord.id!, {
+        usedAt: tokenRecord.usedAt || new Date().toISOString(),
+        status: 0,
+      });
+
+      return {
+        message: 'Tu correo ya estaba verificado. Ya puedes iniciar sesion.',
+      };
+    }
+
+    await this.usersRepository.updateById(tokenRecord.usersId, {
+      emailVerified: true,
+      emailVerifiedAt: new Date().toISOString(),
+    });
+
+    await this.emailVerificationTokenRepository.updateById(tokenRecord.id!, {
+      usedAt: new Date().toISOString(),
+      status: 0,
+    });
+
+    const people = (user as any).people;
+    const customerName = [people?.name, people?.firstLastName].filter(Boolean).join(' ').trim();
+    await this.emailService.sendAccountConfirmationEmail(
+      user.email || user.username,
+      customerName || user.username,
+    );
+
+    return {
+      message: 'Tu correo fue verificado correctamente. Ya puedes iniciar sesion.',
+    };
+  }
+
+  @post('/users/resend-verification-email')
+  @response(200, {
+    description: 'Resends the verification email to a customer account',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            message: {type: 'string'},
+            verificationUrl: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async resendVerificationEmail(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['email'],
+            properties: {
+              email: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {email: string},
+  ): Promise<{message: string; verificationUrl?: string}> {
+    const email = String(body.email || '').trim().toLowerCase();
+    if (!email) {
+      throw new HttpErrors.BadRequest('Debes proporcionar un correo electronico valido.');
+    }
+
+    const user = await this.usersRepository.findOne({
+      where: {
+        or: [
+          {username: email},
+          {email},
+        ],
+      },
+      include: [{relation: 'people'}],
+    });
+
+    if (!user) {
+      return {
+        message: 'Si la cuenta existe y aun no esta verificada, enviaremos un nuevo enlace de verificacion.',
+      };
+    }
+
+    if (user.emailVerified) {
+      return {
+        message: 'La cuenta ya esta verificada. Ya puedes iniciar sesion.',
+      };
+    }
+
+    const verificationUrl = await this.issueEmailVerificationToken(
+      user.id!,
+      user.email || user.username,
+      [
+        (user as any).people?.name,
+        (user as any).people?.firstLastName,
+      ].filter(Boolean).join(' ').trim() || user.username,
+    );
+
+    return {
+      message: 'Si la cuenta existe y aun no esta verificada, enviaremos un nuevo enlace de verificacion.',
+      ...(this.emailService.isPreviewModeEnabled() ? {verificationUrl} : {}),
+    };
+  }
+
+  @get('/users/reset-password/validate')
+  @response(200, {
+    description: 'Validates a password reset token',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            valid: {type: 'boolean'},
+            expiresAt: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async validatePasswordResetToken(
+    @param.query.string('token') token: string,
+  ): Promise<{valid: boolean; expiresAt?: string}> {
+    const tokenRecord = await this.findValidPasswordResetToken(token);
+    return {
+      valid: Boolean(tokenRecord),
+      expiresAt: tokenRecord?.expiresAt,
+    };
+  }
+
+  @post('/users/reset-password')
+  @response(200, {
+    description: 'Resets a user password',
+    content: {
+      'application/json': {
+        schema: {
+          type: 'object',
+          properties: {
+            message: {type: 'string'},
+          },
+        },
+      },
+    },
+  })
+  async resetPassword(
+    @requestBody({
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['token', 'password'],
+            properties: {
+              token: {type: 'string'},
+              password: {type: 'string'},
+            },
+          },
+        },
+      },
+    })
+    body: {token: string; password: string},
+  ): Promise<{message: string}> {
+    const password = String(body.password || '');
+    if (password.length < 8 || password.length > 64) {
+      throw new HttpErrors.BadRequest('La contrasena debe tener entre 8 y 64 caracteres.');
+    }
+
+    const tokenRecord = await this.findValidPasswordResetToken(body.token);
+    if (!tokenRecord) {
+      throw new HttpErrors.BadRequest('El enlace de recuperacion no es valido o ya expiro.');
+    }
+
+    const passwordHash = await this.passwordHasher.hashPassword(password);
+    await this.usersRepository.userCredentials(tokenRecord.usersId).patch({
+      password: passwordHash,
+    });
+
+    await this.passwordResetTokenRepository.updateById(tokenRecord.id!, {
+      usedAt: new Date().toISOString(),
+      status: 0,
+    });
+
+    return {
+      message: 'Tu contrasena fue actualizada correctamente.',
+    };
   }
 
   @get('/users/me')
@@ -623,5 +1000,101 @@ export class UserControllerController {
     if (!roleKey || !['admin', 'administrator', 'super_admin', 'store_admin'].includes(roleKey)) {
       throw new HttpErrors.Forbidden('No tienes permisos para realizar esta accion.');
     }
+  }
+
+  private async findValidPasswordResetToken(token: string) {
+    const normalizedToken = String(token || '').trim();
+    if (!normalizedToken) {
+      return null;
+    }
+
+    const tokenHash = createHash('sha256').update(normalizedToken).digest('hex');
+    const tokenRecord = await this.passwordResetTokenRepository.findOne({
+      where: {
+        tokenHash,
+        status: 1,
+      },
+    });
+
+    if (!tokenRecord || tokenRecord.usedAt) {
+      return null;
+    }
+
+    if (new Date(tokenRecord.expiresAt).getTime() <= Date.now()) {
+      await this.passwordResetTokenRepository.updateById(tokenRecord.id!, {
+        status: 0,
+      });
+      return null;
+    }
+
+    return tokenRecord;
+  }
+
+  private async findValidEmailVerificationToken(token: string) {
+    const normalizedToken = String(token || '').trim();
+    if (!normalizedToken) {
+      return null;
+    }
+
+    const tokenHash = createHash('sha256').update(normalizedToken).digest('hex');
+    const tokenRecord = await this.emailVerificationTokenRepository.findOne({
+      where: {
+        tokenHash,
+        status: 1,
+      },
+    });
+
+    if (!tokenRecord || tokenRecord.usedAt) {
+      return null;
+    }
+
+    if (new Date(tokenRecord.expiresAt).getTime() <= Date.now()) {
+      await this.emailVerificationTokenRepository.updateById(tokenRecord.id!, {
+        status: 0,
+      });
+      return null;
+    }
+
+    return tokenRecord;
+  }
+
+  private async issueEmailVerificationToken(
+    userId: number,
+    recipientEmail: string,
+    recipientName: string,
+  ): Promise<string> {
+    await this.emailVerificationTokenRepository.updateAll(
+      {
+        status: 0,
+        updateDate: new Date().toISOString(),
+      },
+      {
+        usersId: userId,
+        usedAt: undefined,
+        status: 1,
+      },
+    );
+
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
+    const frontendBaseUrl = process.env.FRONTEND_APP_URL || 'http://localhost:5000';
+    const verificationUrl = `${frontendBaseUrl}/client/verify-email?token=${rawToken}`;
+
+    await this.emailVerificationTokenRepository.create({
+      usersId: userId,
+      tokenHash,
+      expiresAt,
+      requestedFor: recipientEmail,
+      status: 1,
+    });
+
+    await this.emailService.sendEmailVerificationEmail(
+      recipientEmail,
+      recipientName,
+      verificationUrl,
+    );
+
+    return verificationUrl;
   }
 }

@@ -1,7 +1,8 @@
-import {BindingScope, injectable, service} from '@loopback/core';
+import {BindingScope, inject, injectable, service} from '@loopback/core';
 import {IsolationLevel, repository} from '@loopback/repository';
 import {HttpErrors} from '@loopback/rest';
 import {UserProfile} from '@loopback/security';
+import {EmailServiceBindings} from '../keys';
 import {CreatePurchaseOrderDto} from '../models/dto/create-purchase-order.dto';
 import {PurchaseOrder} from '../models/purchase-order.model';
 import {CartItemRepository, CouponRepository, CouponUsageRepository, PurchaseOrderRepository, UsersRepository} from '../repositories';
@@ -41,7 +42,7 @@ export class PurchaseOrderService {
     @repository(UsersRepository)
     public usersRepository: UsersRepository,
     @service() public cartService: CartServiceService,
-    @service() public emailService: EmailService,
+    @inject(EmailServiceBindings.EMAIL_SERVICE) public emailService: EmailService,
     @service() public paymentGatewayClientService: PaymentGatewayClientService,
   ) { }
 
@@ -277,7 +278,10 @@ export class PurchaseOrderService {
       const savedOrder = await this.purchaseOrderRepository.findById(purchaseOrder.id!, {
         include: [{relation: 'currentStatus'}],
       });
-      await this.sendOrderCreatedNotification(savedOrder);
+      await this.runNotificationSafely(
+        `order-created:${savedOrder.id}`,
+        () => this.sendOrderCreatedNotification(savedOrder),
+      );
       return savedOrder;
     } catch (err) {
       await tx.rollback();
@@ -547,7 +551,10 @@ export class PurchaseOrderService {
       userId: undefined,
     });
 
-    await this.sendOrderStatusNotification(order.id!, targetStatus.name, statusKey === 'payment_confirmed');
+    await this.runNotificationSafely(
+      `order-status:${order.id}:${statusKey}`,
+      () => this.sendOrderStatusNotification(order.id!, targetStatus.name, statusKey),
+    );
   }
 
   async getOrderDetailForUser(
@@ -569,7 +576,7 @@ export class PurchaseOrderService {
   async sendOrderStatusNotification(
     purchaseOrderId: number,
     statusName?: string,
-    paymentConfirmed?: boolean,
+    statusKey?: string,
   ): Promise<void> {
     const order = await this.purchaseOrderRepository.findById(purchaseOrderId, {
       include: [{relation: 'currentStatus'}],
@@ -597,8 +604,18 @@ export class PurchaseOrderService {
       detailUrl: `${process.env.FRONTEND_APP_URL || 'http://localhost:5000'}/client/orders/${order.id}`,
     };
 
-    if (paymentConfirmed) {
+    if (statusKey === 'payment_confirmed') {
       await this.emailService.sendOrderPaymentConfirmedEmail(recipientEmail, payload);
+      return;
+    }
+
+    if (statusKey === 'shipped') {
+      await this.emailService.sendOrderShippedEmail(recipientEmail, payload);
+      return;
+    }
+
+    if (statusKey === 'delivered') {
+      await this.emailService.sendOrderDeliveredEmail(recipientEmail, payload);
       return;
     }
 
@@ -628,5 +645,16 @@ export class PurchaseOrderService {
       paymentMethodName: order.paymentMethodSnapshot?.displayName,
       detailUrl: `${process.env.FRONTEND_APP_URL || 'http://localhost:5000'}/client/orders/${order.id}`,
     });
+  }
+
+  private async runNotificationSafely(
+    notificationKey: string,
+    callback: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await callback();
+    } catch (error) {
+      console.error(`Notification failed [${notificationKey}]`, error);
+    }
   }
 }

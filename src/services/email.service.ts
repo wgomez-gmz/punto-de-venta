@@ -175,6 +175,34 @@ export class EmailService {
     );
   }
 
+  async sendOrderShippedEmail(to: string, payload: OrderEmailPayload): Promise<void> {
+    await this.sendMail(
+      to,
+      `Pedido enviado #${payload.orderId}`,
+      `
+        <h2>Tu pedido va en camino</h2>
+        <p>Hola ${payload.customerName}, tu pedido #${payload.orderId} fue enviado.</p>
+        <p>Total: ${payload.total.toFixed(2)} MXN</p>
+        ${payload.detailUrl ? `<p><a href="${payload.detailUrl}">Ver seguimiento del pedido</a></p>` : ''}
+      `,
+      `Tu pedido #${payload.orderId} fue enviado y va en camino.`,
+    );
+  }
+
+  async sendOrderDeliveredEmail(to: string, payload: OrderEmailPayload): Promise<void> {
+    await this.sendMail(
+      to,
+      `Pedido entregado #${payload.orderId}`,
+      `
+        <h2>Pedido entregado</h2>
+        <p>Hola ${payload.customerName}, tu pedido #${payload.orderId} fue entregado correctamente.</p>
+        <p>Gracias por tu compra.</p>
+        ${payload.detailUrl ? `<p><a href="${payload.detailUrl}">Ver detalles del pedido</a></p>` : ''}
+      `,
+      `Tu pedido #${payload.orderId} fue entregado correctamente.`,
+    );
+  }
+
   isPreviewModeEnabled(): boolean {
     return this.shouldExposePreview();
   }
